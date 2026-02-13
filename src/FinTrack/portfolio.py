@@ -1,10 +1,10 @@
-from yf_tools import *
-from parsing_tools import *
+from .yf_tools import *
+from .parsing_tools import *
 import datetime 
 import pandas as pd 
 
 
-class Portfolio_tracker:
+class FinTrack:
     '''
     initial_cash = integer representing the initial cash for the cash management system
     currency = string of the currency used, EX: USD, EUR etc
@@ -30,18 +30,45 @@ class Portfolio_tracker:
     def get_portfolio_cash(self, date: datetime.date):
         return get_cash_balance(date)
 
+    def get_index_returns(self, ticker, start_date, end_date):
+
+        df = yf.download(ticker, start=start_date, end=end_date + timedelta(days=1), progress=False)
+
+        df = df.asfreq("D")
+
+        df["Close"] = df["Close"].ffill()
+
+        prices = df["Close"]
+
+        first_price = prices.iloc[0]
+        change = (prices / first_price - 1).dropna()
+
+        returns = change.values.flatten().tolist()
+
+        return returns
+
+    def get_current_holdings(self):
+        return get_current_holdings_longnames()
+    
+    def get_past_holdings(self):
+        return get_past_holdings_longnames()
+
     def get_portfolio_value(self, from_date:datetime.date, to_date:datetime.date) -> list:
         date_range = pd.date_range(from_date, to_date)
         range_value = {}
         for date in date_range:
             portfolio = get_portfolio(date)
             value = 0
-            for ticker in portfolio.keys():
-                amount = portfolio[ticker]
-                value += amount * get_price(ticker, date.date())
+            if not type(portfolio) == tuple:
+                for ticker in portfolio.keys():
+                    amount = portfolio[ticker]
+                    try:
+                        value += amount * get_price(ticker, date.date())
+                    except:
+                        raise Exception(f"Error with {ticker} on {date}")
             
             value += get_cash_balance(date)
 
-            range_value[date] = value
+            range_value[date.date()] = value
         
         return range_value

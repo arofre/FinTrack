@@ -2,7 +2,7 @@ import yfinance as yf
 import sqlite3
 import pandas as pd
 from datetime import datetime, timedelta
-from yf_tools import get_currency_from_ticker, get_exchange_rate
+from .yf_tools import get_currency_from_ticker, get_exchange_rate, get_dividends
 from datetime import datetime, timedelta
 
 def build_holding_table(csv_file: str) -> None:
@@ -93,7 +93,6 @@ def build_cash_table(csv_file: str = 'transactions.csv', initial_cash: float = 1
     Builds or updates the cash table tracking cash balance changes.
     Only creates entries when cash changes (transactions or dividends).
     '''
-    from yf_tools import get_dividends, get_currency_from_ticker, get_exchange_rate
     
     df = pd.read_csv(csv_file, sep=';')
     df['Date'] = pd.to_datetime(df['Date']).dt.date
@@ -289,9 +288,6 @@ def get_price(ticker: str, target_date) -> float:
     Returns the price in SEK for a given ticker on a specific date.
     If no price exists on that date, returns the most recent previous price.
     """
-    import sqlite3
-    import pandas as pd
-    from datetime import datetime
 
     if isinstance(target_date, str):
         target_date = pd.to_datetime(target_date).date()
@@ -465,8 +461,8 @@ def generate_price_table(PORTFOLIO_CURRENCY='SEK', csv_file='transactions.csv'):
                     print(f"    Inserted {ticker} price for {spec_date}: {spec_price_sek:.2f} SEK")
                     
 
-                    fill_end = spec_date + timedelta(days=7)
-                    _fill_prices_forward(ticker, float(spec_price_sek), spec_date + timedelta(days=1), fill_end, cursor)
+                    fill_end = spec_date + timedelta(days=1)
+                    _fill_prices_forward(ticker, float(spec_price_sek), spec_date , fill_end, cursor)
             
             except Exception as e:
                 print(f"  Error processing specified prices for {ticker}: {e}")
@@ -573,3 +569,55 @@ def generate_price_table(PORTFOLIO_CURRENCY='SEK', csv_file='transactions.csv'):
     conn.commit()
     conn.close()
     print("Price table update complete!")
+
+
+def get_current_holdings_longnames() -> dict:
+    '''
+    Returns a dictionary of current holdings with their company long names.
+    
+    Returns:
+        list: Long names of all holdings currently
+    '''
+    current_portfolio = get_portfolio(datetime.today().date())
+    holdings_with_names = []
+    
+    for ticker in current_portfolio.keys():
+        try:
+            yf_ticker = yf.Ticker(ticker)
+            long_name = yf_ticker.info.get('longName', ticker)
+            holdings_with_names.append(long_name)
+        except Exception as e:
+            print(f"Warning: Could not fetch long name for {ticker}: {e}")
+            holdings_with_names.append(ticker)
+    
+    return holdings_with_names
+
+
+def get_past_holdings_longnames() -> dict:
+    '''
+    Returns a dictionary of ALL holdings ever owned (including sold positions) with their company long names.
+    
+    Returns:
+        list: Long names of all holdings every recorded
+    '''
+    conn = sqlite3.connect('portfolio.db')
+    cursor = conn.cursor()
+    
+    cursor.execute("PRAGMA table_info(portfolio)")
+    columns = cursor.fetchall()
+    conn.close()
+    
+    all_tickers = [col[1] for col in columns if col[1] != 'Date']
+    
+    holdings_with_names = []
+    
+    for ticker in all_tickers:
+        try:
+            yf_ticker = yf.Ticker(ticker)
+            long_name = yf_ticker.info.get('longName', ticker)
+            holdings_with_names.append(long_name)
+        except Exception as e:
+            print(f"Warning: Could not fetch long name for {ticker}: {e}")
+            holdings_with_names.append(ticker)
+    
+    return holdings_with_names
