@@ -43,11 +43,11 @@ Date;Ticker;Type;Amount;Price
 ### 2. Initialize the Portfolio Tracker
 
 ```python
-from portfolio_tracker import Portfolio_tracker
+from FinTrack import FinTrack
 import datetime
 
 # Initialize with starting cash and currency
-portfolio = Portfolio_tracker(
+portfolio = FinTrack(
     initial_cash=150000,
     currency="SEK",  # Your portfolio's base currency
     csv_file="transactions.csv"
