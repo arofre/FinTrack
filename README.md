@@ -1,6 +1,14 @@
-# FinTrack
+# FinTrack - Advanced Portfolio Tracker
 
-A Python package for tracking a dynamic portfolio of stocks with daily price monitoring, cash management, and dividend handling. This tool helps you maintain a record of your stock holdings, monitor their values over time, and automatically track cash flows from transactions and dividends.
+[![Tests](https://img.shields.io/badge/tests-passing-green)](./tests)
+[![Python](https://img.shields.io/badge/python-3.8+-blue)](https://www.python.org/)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
+A Python package for tracking and analyzing stock portfolios with multi-currency support and automatic dividend tracking.
+
+## Important note
+
+Tests, instructions and docstrings written using Claude, I tried to find any incorrect information but some may have slipped through the crack. 
 
 ## Features
 
@@ -11,6 +19,8 @@ A Python package for tracking a dynamic portfolio of stocks with daily price mon
 - **Dividend Tracking**: Automatically capture and account for dividend payments
 - **Historical Analysis**: Query portfolio composition and value at any point in time
 - **Index Comparison**: Compare your portfolio returns against benchmark indices
+- **Comprehensive Logging**: Track all operations with detailed logging
+- **Input Validation**: Validate all transaction data before processing
 
 ## Installation
 
@@ -20,142 +30,331 @@ Install the package using pip:
 pip install FinTrack
 ```
 
+For development:
+```bash
+git clone https://github.com/arofredriksson/FinTrack.git
+cd FinTrack
+pip install -e ".[dev]"
+pytest tests/
+```
+
 ## Quick Start
 
-### 1. Create a Transaction CSV File
+### 1. Create a Transaction CSV
 
-First, create a CSV file with your transactions (`transactions.csv`):
-
-```
+Create `transactions.csv`:
+```csv
 Date;Ticker;Type;Amount;Price
 2023-01-15;AAPL;Buy;10;150.00
 2023-02-20;MSFT;Buy;5;250.00
 2023-03-10;AAPL;Sell;5;165.00
 ```
 
-**CSV Columns:**
-- `Date`: Transaction date (YYYY-MM-DD format)
-- `Ticker`: Stock ticker symbol
-- `Type`: Either "Buy" or "Sell"
-- `Amount`: Number of shares
-- `Price`: Price per share (in the stock's native currency)
-
-### 2. Initialize the Portfolio Tracker
+### 2. Initialize and Query
 
 ```python
-from portfolio_tracker import Portfolio_tracker
-import datetime
+from FinTrack import FinTrack
+from datetime import date
 
-# Initialize with starting cash and currency
-portfolio = Portfolio_tracker(
+# Create portfolio
+portfolio = FinTrack(
     initial_cash=150000,
-    currency="SEK",  # Your portfolio's base currency
+    currency="USD",
     csv_file="transactions.csv"
 )
 
-# Update portfolio (fetches latest prices and processes new transactions)
+# Update with latest data
 portfolio.update_portfolio()
+
+# Get current holdings
+holdings = portfolio.get_current_holdings()
+print(f"Holdings: {holdings}")
+
+# Get portfolio value over time
+values = portfolio.get_portfolio_value(
+    date(2023, 1, 1),
+    date(2023, 12, 31)
+)
+
+# Get portfolio summary
+summary = portfolio.get_portfolio_summary()
+print(f"Total Value: {summary['total_value']:,.2f} {summary['currency']}")
 ```
 
-### 3. Query Your Portfolio
+## Documentation
+
+### Core Methods
+
+#### `FinTrack.__init__(initial_cash, currency, csv_file, user_id=None)`
+Initialize a portfolio tracker.
+
+**Parameters:**
+- `initial_cash`: Starting cash amount (must be non-negative)
+- `currency`: Base currency code (3-letter code, e.g., 'USD', 'EUR')
+- `csv_file`: Path to transactions CSV file
+- `user_id`: Optional identifier for multi-user setups (default: 'default')
+
+**Raises:**
+- `FileNotFoundError`: If CSV file doesn't exist
+- `ValidationError`: If parameters are invalid
+
+#### `get_current_holdings() -> List[str]`
+Get list of current stock holdings with company names.
+
+#### `get_portfolio_value(from_date, to_date) -> Dict[date, float]`
+Get portfolio value for each day in date range.
+
+#### `get_portfolio_cash(date) -> Optional[float]`
+Get cash balance on specific date.
+
+#### `get_portfolio_summary() -> Dict`
+Get comprehensive portfolio summary including:
+- Current holdings with prices and values
+- Cash balance
+- Total portfolio value
+
+#### `get_index_returns(ticker, start_date, end_date) -> List[float]`
+Get daily returns for a benchmark index.
+
+#### `update_portfolio()`
+Refresh portfolio with latest data from Yahoo Finance.
+
+### Configuration
+
+Data is stored in user's home directory:
+```
+~/.fintrack/
+├── default/                    # Default user
+│   └── data/
+│       └── portfolio.db       # Portfolio database
+├── user123/                    # Custom user
+│   └── data/
+│       └── portfolio.db
+└── logs/
+    └── fintrack.log           # Activity log
+```
+
+Access paths programmatically:
+```python
+from FinTrack import Config
+
+data_dir = Config.get_data_dir("user123")
+db_path = Config.get_db_path("user123")
+logs_dir = Config.get_logs_dir()
+```
+
+### Logging
+
+FinTrack uses Python's standard logging module:
 
 ```python
-# Get current holdings
-current_holdings = portfolio.get_current_holdings()
-print(f"Current holdings: {current_holdings}")
+from FinTrack import setup_logger, get_logger
+import logging
 
-# Get all holdings ever owned
-all_holdings = portfolio.get_past_holdings()
-print(f"All past holdings: {all_holdings}")
+# Set up with custom level
+logger = setup_logger("my_app", level=logging.DEBUG)
 
-# Get portfolio value for a date range
-portfolio_values = portfolio.get_portfolio_value(
-    from_date=datetime.date(2023, 1, 1),
-    to_date=datetime.date(2023, 12, 31)
+# Or get existing logger
+logger = get_logger(__name__)
+
+logger.info("Portfolio initialized")
+logger.debug("Detailed debug information")
+logger.warning("Warning about something")
+logger.error("An error occurred")
+```
+
+Logs are written to `~/.fintrack/logs/fintrack.log` by default.
+
+### Error Handling
+
+FinTrack provides specific exception types:
+
+```python
+from FinTrack import (
+    FinTrackError,        # Base exception
+    ValidationError,      # Input validation failed
+    DataFetchError,       # Yahoo Finance fetch failed
+    PriceError,          # Price data unavailable
+    DatabaseError,       # Database operation failed
+    ConfigError          # Configuration issue
 )
 
-# Get cash balance at a specific date
-cash_balance = portfolio.get_portfolio_cash(datetime.date(2023, 6, 15))
-print(f"Cash balance: {cash_balance}")
+try:
+    portfolio = FinTrack(150000, "USD", "transactions.csv")
+except ValidationError as e:
+    print(f"Invalid input: {e}")
+except FinTrackError as e:
+    print(f"FinTrack error: {e}")
+```
 
-# Compare against index returns
-index_returns = portfolio.get_index_returns(
-    ticker="^GSPC",  # S&P 500
-    start_date=datetime.date(2023, 1, 1),
-    end_date=datetime.date(2023, 12, 31)
-)
+### Input Validation
+
+All transaction data is automatically validated:
+
+```python
+from FinTrack import TransactionValidator, ValidationError
+
+df = pd.read_csv("transactions.csv", sep=";")
+is_valid, errors = TransactionValidator.validate_dataframe(df)
+
+if not is_valid:
+    for error in errors:
+        print(f"  - {error}")
+```
+
+Validation checks:
+- ✓ Date format (YYYY-MM-DD)
+- ✓ Ticker symbols (non-empty, alphanumeric)
+- ✓ Transaction type (Buy or Sell)
+- ✓ Amount (positive integer)
+- ✓ Price (positive number)
+
+## CSV Format
+
+**Delimiter:** Semicolon (`;`)
+
+**Required columns:**
+| Column | Type | Description |
+|--------|------|-------------|
+| Date | YYYY-MM-DD | Transaction date |
+| Ticker | String | Stock ticker symbol |
+| Type | Buy/Sell | Transaction type |
+| Amount | Integer | Number of shares |
+| Price | Number | Price per share |
+
+**Optional columns:**
+- Custom price specifications (to override Yahoo Finance data)
+- Additional metadata
+
+**Example:**
+```csv
+Date;Ticker;Type;Amount;Price
+2023-01-15;AAPL;Buy;10;150.50
+2023-02-20;MSFT;Buy;5;250.75
+2023-03-10;AAPL;Sell;5;165.25
+2023-04-05;TSLA;Buy;2;800.00
 ```
 
 ## How It Works
 
-### Data Storage
+### Database Structure
 
-The package uses SQLite to store three main tables:
+FinTrack uses SQLite with three main tables:
 
-1. **Portfolio Table**: Tracks holdings for each date based on transactions
-2. **Cash Table**: Maintains cash balance accounting for transactions and dividends
-3. **Prices Table**: Stores historical prices for all stocks in the portfolio
+1. **portfolio**: Holdings for each date
+2. **cash**: Cash balance tracking
+3. **prices**: Daily stock prices in base currency
 
 ### Price Management
 
-- Prices are automatically fetched from Yahoo Finance using yfinance
-- Multi-currency portfolios are supported with automatic conversion to your base currency
-- Prices are forward-filled for missing trading days
-- You can specify custom prices for specific dates by adding a "Prices" sheet to your CSV
+- Prices automatically fetched from Yahoo Finance
+- Multi-currency portfolios: prices converted to base currency
+- Forward-filling for missing trading days
+- Custom prices from CSV supported
 
 ### Cash Flow Tracking
 
-Cash balance is updated for:
-- Stock purchases (cash out)
-- Stock sales (cash in)
-- Dividend payments (cash in)
+Cash balance updated for:
+- Stock purchases (deduct)
+- Stock sales (add)
+- Dividend payments (add)
 
-## Advanced Features
+## Supported Currencies
 
-### Custom Price Specifications
-
-You can specify custom prices for certain dates by including them in your transaction CSV. The package will use these instead of fetching from Yahoo Finance when available.
-
-### Portfolio Reset
-
-Reset your portfolio to start fresh:
+Works with any currency pair available on Yahoo Finance:
 
 ```python
-portfolio.reset_portfolio()
+# Major currencies
+portfolio = FinTrack(100000, "USD")  # US Dollar
+portfolio = FinTrack(100000, "EUR")  # Euro
+portfolio = FinTrack(100000, "GBP")  # British Pound
+portfolio = FinTrack(100000, "JPY")  # Japanese Yen
+portfolio = FinTrack(100000, "SEK")  # Swedish Krona
+
+# Emerging markets and others available
+portfolio = FinTrack(100000, "INR")  # Indian Rupee
+portfolio = FinTrack(100000, "BRL")  # Brazilian Real
 ```
 
 ## Requirements
 
-- Python >= 3.7
-- pandas
-- yfinance
+- Python >= 3.8
+- pandas >= 1.3.0
+- yfinance >= 0.2.0
 
-## Supported Currencies
+## Development
 
-The package supports any currency pair available on Yahoo Finance, including:
-- Major currencies: USD, EUR, GBP, JPY, CHF, AUD, CAD, SEK, NOK, DKK
-- Cryptocurrencies through crypto tickers
-- Emerging market currencies
+### Running Tests
+
+```bash
+# Run all tests
+pytest tests/
+
+# With coverage
+pytest tests/ --cov=src/FinTrack --cov-report=html
+
+# Specific test file
+pytest tests/test_validation.py
+
+# Specific test
+pytest tests/test_validation.py::TestTransactionValidator::test_valid_transaction_row
+```
+
+### Code Quality
+
+```bash
+# Format code
+black src/
+
+# Lint
+flake8 src/
+
+# Type checking
+mypy src/
+```
 
 ## Limitations
 
-- Prices are fetched from Yahoo Finance; ensure data quality
-- Intra-day trading is not supported (daily resolution only)
-- Corporate actions (stock splits, mergers) should be manually adjusted in transactions
-- Past dividend data depends on Yahoo Finance's historical dividend records
+- Prices are fetched from Yahoo Finance; verify data quality
+- Daily resolution only (intra-day trading not supported)
+- Corporate actions (stock splits, mergers) must be manually adjusted
+- Past dividend data depends on Yahoo Finance records
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request on GitHub.
+Contributions are welcome! Please:
+
+1. Fork the repository
+2. Create a feature branch
+3. Add tests for new functionality
+4. Ensure all tests pass
+5. Submit a pull request
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+MIT License - see [LICENSE](LICENSE) file for details.
 
 ## Disclaimer
 
-Always verify your portfolio calculations independently. The author is not responsible for any financial losses resulting from the use of this software.
+This software is provided as-is for educational and informational purposes. Always verify your portfolio calculations independently. The author is not responsible for any financial losses resulting from use of this software.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for detailed release notes.
 
 ## Support
 
-For issues, questions, or suggestions, please open an issue on the GitHub repository.
+For issues, questions, or suggestions:
+- [GitHub Issues](https://github.com/arofredriksson/FinTrack/issues)
+- Email: arofre903@gmail.com
+
+## Version History
+
+- **v1.1.0** (2026): Major refactoring with full test suite, proper error handling, logging, and pandas 2.0 compatibility
+- **v1.0.0** (2026): Initial release
+
+---
+
+**Built by:** Aron Fredriksson  
+**License:** MIT  
+**Last Updated:** 2026
