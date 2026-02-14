@@ -54,9 +54,15 @@ Date;Ticker;Type;Amount;Price
 
 ```python
 from FinTrack import FinTrack
+<<<<<<< HEAD
 from datetime import date
 
 # Create portfolio
+=======
+import datetime
+
+# Initialize with starting cash and currency
+>>>>>>> d90a4fde56d5aa260e21c1c32011ff6da865ce9e
 portfolio = FinTrack(
     initial_cash=150000,
     currency="USD",
