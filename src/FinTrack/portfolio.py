@@ -257,13 +257,39 @@ class FinTrack:
             if df.empty:
                 raise DataFetchError(f"No data available for {ticker}")
 
-            df = df.asfreq("D")
-            df["Close"] = df["Close"].ffill()
+            if isinstance(df.columns, pd.MultiIndex):
+                if 'Close' in df.columns.get_level_values(0):
+                    close_prices = df.xs('Close', level=0, axis=1)
+                    if isinstance(close_prices, pd.DataFrame):
+                        close_prices = close_prices.iloc[:, 0]
+                elif 'Close' in df.columns.get_level_values(1):
+                    close_prices = df.xs('Close', level=1, axis=1)
+                    if isinstance(close_prices, pd.DataFrame):
+                        close_prices = close_prices.iloc[:, 0]
+                else:
+                    close_prices = df.iloc[:, 0]
+            else:
+                if 'Close' in df.columns:
+                    close_prices = df['Close']
+                else:
+                    close_prices = df.iloc[:, 0]
 
-            prices = df["Close"]
+            date_range = pd.date_range(start=start_date, end=end_date, freq="D")
+            
+            close_prices = close_prices.reindex(date_range)
 
-            first_price = prices.iloc[0]
-            change = (prices / first_price - 1).dropna()
+            close_prices = close_prices.ffill()
+            
+            close_prices = close_prices.bfill()
+
+            if close_prices.isna().all():
+                raise DataFetchError(f"No valid price data for {ticker}")
+
+            first_price = close_prices.iloc[0]
+            if pd.isna(first_price) or first_price == 0:
+                raise DataFetchError(f"Invalid starting price for {ticker}")
+
+            change = (close_prices / first_price - 1)
 
             returns = change.values.flatten().tolist()
 
@@ -321,6 +347,171 @@ class FinTrack:
             "cash": cash,
             "total_value": total_value,
         }
+
+    def get_stock_returns(
+        self, from_date: date, to_date: date
+    ) -> Dict[str, float]:
+        """
+        Calculate returns for each stock held during the period.
+
+        Accounts for position changes (buys/sells) during the period using
+        a Modified Dietz-style calculation.
+
+        Args:
+            from_date: Start date
+            to_date: End date
+
+        Returns:
+            Dictionary mapping ticker symbols to returns (as decimals, e.g., 0.062 = 6.2%)
+
+        Example:
+            >>> returns = portfolio.get_stock_returns(
+            ...     date(2023, 1, 1),
+            ...     date(2023, 12, 31)
+            ... )
+            >>> for ticker, ret in returns.items():
+            ...     print(f"{ticker}: {ret:.2%}")
+        """
+        logger.info(f"Calculating stock returns from {from_date} to {to_date}")
+
+        try:
+            df = pd.read_csv(self.csv_file, sep=";")
+            df["Date"] = pd.to_datetime(df["Date"]).dt.date
+        except Exception as e:
+            logger.error(f"Error reading transactions: {e}")
+            raise FinTrackError(f"Could not read transactions: {str(e)}") from e
+
+        all_tickers = set()
+        
+        start_portfolio = get_portfolio(from_date, self.user_id)
+        all_tickers.update(start_portfolio.keys())
+        
+        period_transactions = df[(df["Date"] >= from_date) & (df["Date"] <= to_date)]
+        all_tickers.update(period_transactions["Ticker"].unique())
+
+        returns = {}
+
+        for ticker in all_tickers:
+            try:
+                start_shares = start_portfolio.get(ticker, 0)
+                start_price = get_price(ticker, from_date, self.user_id)
+                start_value = start_shares * start_price if start_price else 0
+
+                end_portfolio = get_portfolio(to_date, self.user_id)
+                end_shares = end_portfolio.get(ticker, 0)
+                end_price = get_price(ticker, to_date, self.user_id)
+                end_value = end_shares * end_price if end_price else 0
+
+                ticker_transactions = period_transactions[
+                    period_transactions["Ticker"] == ticker
+                ]
+                
+                net_invested = 0
+                for _, transaction in ticker_transactions.iterrows():
+                    trans_date = transaction["Date"]
+                    trans_price = get_price(ticker, trans_date, self.user_id)
+                    
+                    if trans_price is None:
+                        continue
+                        
+                    amount = transaction["Amount"]
+                    cash_flow = amount * trans_price
+                    
+                    if transaction["Type"] == "Buy":
+                        net_invested += cash_flow
+                    else:
+                        net_invested -= cash_flow 
+
+                
+                if end_value == 0 and start_value > 0:
+                    sale_proceeds = -net_invested
+                    stock_return = (sale_proceeds - start_value) / start_value if start_value > 0 else 0
+                    returns[ticker] = stock_return
+                    logger.debug(
+                        f"{ticker}: Complete exit - Start=${start_value:.2f}, "
+                        f"Sold for=${sale_proceeds:.2f}, Return={stock_return:.2%}"
+                    )
+                
+                elif start_value > 0 or net_invested > 0:
+                    denominator = start_value + net_invested
+                    
+                    if denominator != 0:
+                        stock_return = (end_value - start_value - net_invested) / denominator
+                        returns[ticker] = stock_return
+                        logger.debug(
+                            f"{ticker}: Start=${start_value:.2f}, Invested=${net_invested:.2f}, "
+                            f"End=${end_value:.2f}, Return={stock_return:.2%}"
+                        )
+                    elif end_value > 0:
+                        stock_return = (end_value - net_invested) / net_invested if net_invested > 0 else 0
+                        returns[ticker] = stock_return
+                        logger.debug(f"{ticker}: New position, Return={stock_return:.2%}")
+
+            except Exception as e:
+                logger.warning(f"Could not calculate return for {ticker}: {e}")
+                continue
+
+        logger.info(f"Calculated returns for {len(returns)} stocks")
+        return returns
+
+    def print_stock_returns(
+        self, from_date: date, to_date: date, sort_by: str = "return"
+    ) -> None:
+        """
+        Print a formatted table of stock returns.
+
+        Args:
+            from_date: Start date
+            to_date: End date
+            sort_by: How to sort results - "return" (default), "ticker", or "alpha"
+
+        Example:
+            >>> portfolio.print_stock_returns(
+            ...     date(2023, 1, 1),
+            ...     date(2023, 12, 31)
+            ... )
+            Stock Returns (2023-01-01 to 2023-12-31)
+            ==========================================
+            AAPL         12.50%
+            MSFT          8.23%
+            TSLA         -5.12%
+        """
+        returns = self.get_stock_returns(from_date, to_date)
+        
+        if not returns:
+            print("No returns data available for the specified period.")
+            return
+
+        ticker_names = {}
+        for ticker in returns.keys():
+            try:
+                yf_ticker = yf.Ticker(ticker)
+                long_name = yf_ticker.info.get("longName", ticker)
+                ticker_names[ticker] = long_name
+            except Exception:
+                ticker_names[ticker] = ticker
+
+        print(f"\nStock Returns ({from_date} to {to_date})")
+        print("=" * 50)
+
+        if sort_by == "return":
+            sorted_items = sorted(returns.items(), key=lambda x: x[1], reverse=True)
+        elif sort_by == "alpha" or sort_by == "ticker":
+            sorted_items = sorted(returns.items(), key=lambda x: ticker_names[x[0]])
+        else:
+            sorted_items = returns.items()
+
+        for ticker, ret in sorted_items:
+            name = ticker_names[ticker]
+            if len(name) > 40:
+                name = name[:37] + "..."
+            print(f"{name:<40} {ret:>7.2%}")
+        
+        print("=" * 50)
+        
+        avg_return = sum(returns.values()) / len(returns) if returns else 0
+        print(f"Average Return: {avg_return:>7.2%}")
+        print()
 
     def __repr__(self) -> str:
         """Return string representation of portfolio."""

@@ -5,11 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2026-02-15
+
+## Changes
+
+Changed some inconsistencies in the the gathering of index returns and added function for getting summaries between dates.
+
 ## [1.1.0] - 2026-02-14
 
 ### Major Changes
 
-This is a comprehensive rewrite addressing all code quality, documentation, and reliability issues found in v1.0.0.
+This is a comprehensive rewrite addressing all code quality, documentation, and reliability issues found in v1.0.0. Tests, instructions and docstrings added using Claude, tried to find any incorrect information but some may have slipped through the crack. 
 
 ### Added
 
