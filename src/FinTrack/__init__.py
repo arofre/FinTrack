@@ -1,6 +1,6 @@
 """FinTrack - A Python package for tracking stock portfolios."""
 
-__version__ = "1.1.0"
+__version__ = "1.1.1"
 __author__ = "Aron Fredriksson"
 __email__ = "arofre903@gmail.com"
 __license__ = "MIT"

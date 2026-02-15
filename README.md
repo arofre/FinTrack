@@ -18,6 +18,7 @@ Tests, instructions and docstrings written using Claude, I tried to find any inc
 - **Cash Management**: Maintain accurate cash balances accounting for buy/sell transactions and dividend payments
 - **Dividend Tracking**: Automatically capture and account for dividend payments
 - **Historical Analysis**: Query portfolio composition and value at any point in time
+- **Stock Returns Analysis**: Calculate individual stock performance accounting for position changes
 - **Index Comparison**: Compare your portfolio returns against benchmark indices
 - **Comprehensive Logging**: Track all operations with detailed logging
 - **Input Validation**: Validate all transaction data before processing
@@ -113,8 +114,81 @@ Get comprehensive portfolio summary including:
 - Cash balance
 - Total portfolio value
 
+#### `get_stock_returns(from_date, to_date) -> Dict[str, float]`
+**New in v1.1.1**: Calculate returns for each stock held during the period.
+
+Accounts for position changes (buys/sells) during the period using a Modified Dietz-style calculation. This method properly handles:
+- Stocks held throughout the entire period
+- Stocks purchased during the period
+- Stocks sold during the period
+- Partial position changes
+
+**Parameters:**
+- `from_date`: Start date
+- `to_date`: End date
+
+**Returns:**
+- Dictionary mapping ticker symbols to returns (as decimals, e.g., 0.062 = 6.2%)
+
+**Example:**
+```python
+returns = portfolio.get_stock_returns(
+    date(2023, 1, 1),
+    date(2023, 12, 31)
+)
+for ticker, ret in returns.items():
+    print(f"{ticker}: {ret:.2%}")
+```
+
+#### `print_stock_returns(from_date, to_date, sort_by='return')`
+**New in v1.1.1**: Print a formatted table of stock returns.
+
+**Parameters:**
+- `from_date`: Start date
+- `to_date`: End date
+- `sort_by`: How to sort results - "return" (default), "ticker", or "alpha"
+
+**Example:**
+```python
+portfolio.print_stock_returns(
+    date(2023, 1, 1),
+    date(2023, 12, 31)
+)
+# Output:
+# Stock Returns (2023-01-01 to 2023-12-31)
+# ==================================================
+# Apple Inc.                                12.50%
+# Microsoft Corporation                      8.23%
+# Tesla, Inc.                               -5.12%
+# ==================================================
+# Average Return:                            5.20%
+```
+
 #### `get_index_returns(ticker, start_date, end_date) -> List[float]`
-Get daily returns for a benchmark index.
+Get daily returns for a benchmark index. **Improved in v1.1.1** with more robust data handling and better error recovery.
+
+Returns are calculated as (price - initial_price) / initial_price.
+
+**Parameters:**
+- `ticker`: Yahoo Finance ticker (e.g., '^GSPC' for S&P 500)
+- `start_date`: Start date
+- `end_date`: End date
+
+**Returns:**
+- List of daily returns (as decimals, e.g., 0.02 = 2%)
+
+**Raises:**
+- `DataFetchError`: If index data cannot be fetched
+
+**Example:**
+```python
+returns = portfolio.get_index_returns(
+    '^GSPC',
+    date(2023, 1, 1),
+    date(2023, 12, 31)
+)
+print(f"S&P 500 final return: {returns[-1]:.2%}")
+```
 
 #### `update_portfolio()`
 Refresh portfolio with latest data from Yahoo Finance.
@@ -259,6 +333,16 @@ Cash balance updated for:
 - Stock sales (add)
 - Dividend payments (add)
 
+### Stock Returns Calculation
+
+The `get_stock_returns()` method uses a Modified Dietz approach to calculate time-weighted returns that account for:
+- Initial position value
+- Cash flows (buys/sells) during the period
+- Timing of transactions
+- Final position value
+
+This provides accurate performance metrics even when position sizes change during the analysis period.
+
 ## Supported Currencies
 
 Works with any currency pair available on Yahoo Finance:
@@ -350,11 +434,12 @@ For issues, questions, or suggestions:
 
 ## Version History
 
-- **v1.1.0** (2026): Major refactoring with full test suite, proper error handling, logging, and pandas 2.0 compatibility
-- **v1.0.0** (2026): Initial release
+- **v1.1.1** (2026-02-15): Added stock returns analysis methods and improved index returns handling
+- **v1.1.0** (2026-02-14): Major refactoring with full test suite, proper error handling, logging, and pandas 2.0 compatibility
+- **v1.0.0** (2026-02-13): Initial release
 
 ---
 
 **Built by:** Aron Fredriksson  
 **License:** MIT  
-**Last Updated:** 2026
+**Last Updated:** February 2026

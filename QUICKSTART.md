@@ -1,4 +1,4 @@
-# Quick Start Guide - FinTrack 1.1
+# Quick Start Guide - FinTrack 1.1.1
 
 Get your portfolio tracking up and running in 5 minutes!
 
@@ -121,7 +121,77 @@ print(f"S&P 500 first day return: {index_returns[0]:.2%}")
 print(f"S&P 500 last day return: {index_returns[-1]:.2%}")
 ```
 
-## 4. View All Holdings (Past and Present)
+## 4. Analyze Stock Performance (New in v1.1.1)
+
+### Get Individual Stock Returns
+
+```python
+from datetime import date
+
+# Calculate returns for each stock in your portfolio
+returns = portfolio.get_stock_returns(
+    from_date=date(2023, 1, 1),
+    to_date=date(2023, 12, 31)
+)
+
+# Display returns programmatically
+for ticker, ret in returns.items():
+    print(f"{ticker}: {ret:.2%}")
+
+# Example output:
+# AAPL: 48.25%
+# MSFT: 57.38%
+# TSLA: -11.93%
+```
+
+### Print Formatted Stock Returns Table
+
+```python
+from datetime import date
+
+# Print a nicely formatted table of returns
+portfolio.print_stock_returns(
+    from_date=date(2023, 1, 1),
+    to_date=date(2023, 12, 31),
+    sort_by="return"  # Options: "return", "ticker", "alpha"
+)
+
+# Example output:
+# Stock Returns (2023-01-01 to 2023-12-31)
+# ==================================================
+# Microsoft Corporation                     57.38%
+# Apple Inc.                                48.25%
+# Tesla, Inc.                              -11.93%
+# ==================================================
+# Average Return:                           31.23%
+```
+
+### Sort Stock Returns Different Ways
+
+```python
+# Sort by highest returns first (default)
+portfolio.print_stock_returns(
+    from_date=date(2023, 1, 1),
+    to_date=date(2023, 12, 31),
+    sort_by="return"
+)
+
+# Sort alphabetically by company name
+portfolio.print_stock_returns(
+    from_date=date(2023, 1, 1),
+    to_date=date(2023, 12, 31),
+    sort_by="alpha"
+)
+
+# Sort by ticker symbol
+portfolio.print_stock_returns(
+    from_date=date(2023, 1, 1),
+    to_date=date(2023, 12, 31),
+    sort_by="ticker"
+)
+```
+
+## 5. View All Holdings (Past and Present)
 
 ```python
 # Get all stocks ever held in the portfolio
@@ -129,7 +199,7 @@ all_holdings = portfolio.get_past_holdings()
 print(f"All past holdings: {all_holdings}")
 ```
 
-## 5. Get Portfolio Summary
+## 6. Get Portfolio Summary
 
 ```python
 # Get a comprehensive summary of your current portfolio
@@ -142,7 +212,7 @@ for holding in summary['holdings']:
     print(f"  {holding['ticker']}: {holding['shares']} shares @ {holding['price']:.2f}")
 ```
 
-## 6. Update Portfolio (Daily)
+## 7. Update Portfolio (Daily)
 
 The portfolio is automatically updated when you initialize it. For subsequent runs, call update:
 
@@ -150,7 +220,7 @@ The portfolio is automatically updated when you initialize it. For subsequent ru
 portfolio.update_portfolio()  # Fetches latest prices, processes transactions, tracks dividends
 ```
 
-## Complete Example Script
+## Complete Example Script with New Features
 
 ```python
 from FinTrack import FinTrack
@@ -166,43 +236,80 @@ portfolio = FinTrack(
 # Update with latest data
 portfolio.update_portfolio()
 
-# Get portfolio metrics
-print("Current Holdings")
+print("=" * 60)
+print("PORTFOLIO ANALYSIS")
+print("=" * 60)
+
+# Current Holdings
+print("\n1. Current Holdings")
+print("-" * 60)
 holdings = portfolio.get_current_holdings()
 for holding in holdings:
     print(f"  - {holding}")
 
-print("\nPortfolio Value")
+# Portfolio Value Over Time
+print("\n2. Portfolio Value")
+print("-" * 60)
 values = portfolio.get_portfolio_value(
     from_date=date(2023, 1, 1),
     to_date=date(2023, 12, 31)
 )
-
-# Print first and last value
 first_date = min(values.keys())
 last_date = max(values.keys())
-print(f"Start ({first_date}): {values[first_date]:,.2f}")
-print(f"End ({last_date}): {values[last_date]:,.2f}")
+print(f"Start ({first_date}): ${values[first_date]:,.2f}")
+print(f"End ({last_date}): ${values[last_date]:,.2f}")
+gain = values[last_date] - values[first_date]
+pct_gain = (gain / values[first_date]) * 100
+print(f"Total Gain: ${gain:,.2f} ({pct_gain:.2f}%)")
 
-print("\nCash Balance")
+# Cash Balance
+print("\n3. Cash Balance")
+print("-" * 60)
 cash = portfolio.get_portfolio_cash(date(2023, 12, 31))
-print(f"Final cash balance: {cash:,.2f}")
+print(f"Final cash balance: ${cash:,.2f}")
 
-print("\nPortfolio Summary")
+# Portfolio Summary
+print("\n4. Portfolio Summary")
+print("-" * 60)
 summary = portfolio.get_portfolio_summary()
-print(f"Total Value: {summary['total_value']:,.2f} {summary['currency']}")
+print(f"Total Value: ${summary['total_value']:,.2f} {summary['currency']}")
+print(f"Number of Holdings: {len(summary['holdings'])}")
 
-print("\nBenchmark Comparison")
+# Individual Stock Returns (NEW in v1.1.1)
+print("\n5. Individual Stock Performance")
+print("-" * 60)
+portfolio.print_stock_returns(
+    date(2023, 1, 1),
+    date(2023, 12, 31),
+    sort_by="return"
+)
+
+# Benchmark Comparison
+print("\n6. Benchmark Comparison")
+print("-" * 60)
 try:
     index = portfolio.get_index_returns(
         "^GSPC",
         date(2023, 1, 1),
         date(2023, 12, 31)
     )
-    print(f"S&P 500 first day return: {index[0]:.2%}")
-    print(f"S&P 500 last day return: {index[-1]:.2%}")
+    print(f"S&P 500 return for period: {index[-1]:.2%}")
+    
+    # Compare to portfolio
+    portfolio_return = (values[last_date] - values[first_date]) / values[first_date]
+    print(f"Your portfolio return: {portfolio_return:.2%}")
+    
+    if portfolio_return > index[-1]:
+        outperformance = (portfolio_return - index[-1]) * 100
+        print(f"✓ Outperformed S&P 500 by {outperformance:.2f} percentage points")
+    else:
+        underperformance = (index[-1] - portfolio_return) * 100
+        print(f"✗ Underperformed S&P 500 by {underperformance:.2f} percentage points")
+        
 except Exception as e:
     print(f"Could not fetch benchmark data: {e}")
+
+print("\n" + "=" * 60)
 ```
 
 ## Supported Currencies
@@ -230,6 +337,32 @@ portfolio = FinTrack(
     csv_file="transactions.csv"  # Contains AAPL, MSFT, etc. (USD stocks)
 )
 # Prices are automatically converted from USD to EUR!
+```
+
+## Understanding Stock Returns (New in v1.1.1)
+
+The `get_stock_returns()` method calculates time-weighted returns that properly account for:
+
+### Stocks Held Throughout Period
+```python
+# If you owned 100 shares of AAPL the entire year
+# Start value: 100 shares × $150 = $15,000
+# End value: 100 shares × $180 = $18,000
+# Return: ($18,000 - $15,000) / $15,000 = 20%
+```
+
+### Stocks with Buys During Period
+```python
+# Started with 50 shares, bought 50 more mid-year
+# Accounts for the additional capital invested
+# Uses Modified Dietz method for accurate performance
+```
+
+### Stocks Completely Sold During Period
+```python
+# If you sold your entire position
+# Calculates return based on sale proceeds vs. initial value
+# Shows actual realized gain/loss
 ```
 
 ## Troubleshooting
@@ -264,6 +397,12 @@ Check your internet connection. The package needs to fetch currency data from Ya
 - Run `portfolio.update_portfolio()` to refresh
 - Check logs in `~/.fintrack/logs/fintrack.log` for details
 
+### Stock returns seem incorrect
+- Ensure your CSV includes all transactions for the period
+- Verify transaction dates are accurate
+- Check that buy/sell amounts are correct
+- The method accounts for position changes - partial sales will affect returns
+
 ## Logging
 
 FinTrack logs all operations to help with debugging:
@@ -274,7 +413,8 @@ cat ~/.fintrack/logs/fintrack.log
 
 # Enable debug logging
 from FinTrack import setup_logger
-logger = setup_logger(__name__, level=10)  # DEBUG level
+import logging
+logger = setup_logger(__name__, level=logging.DEBUG)
 ```
 
 ## Data Storage
@@ -309,6 +449,42 @@ portfolio = FinTrack(
 5. **Multi-currency**: Works seamlessly with mixed-currency portfolios
 6. **Dividends are automatic**: The package fetches and accounts for them automatically
 7. **Check logs**: Review `~/.fintrack/logs/fintrack.log` if something seems wrong
+8. **Analyze performance**: Use the new stock returns methods to understand individual holdings
+9. **Compare periods**: Run stock returns for different time periods to see trends
+10. **Benchmark wisely**: Compare against relevant indices for your portfolio composition
+
+## What's New in v1.1.1
+
+### Stock Returns Analysis
+- **`get_stock_returns()`**: Calculate individual stock performance
+- **`print_stock_returns()`**: Display formatted returns table
+- **Proper handling**: Accounts for buys, sells, and position changes
+- **Multiple sort options**: Sort by return, ticker, or alphabetically
+
+### Improved Index Returns
+- More robust data handling
+- Better error recovery
+- Consistent return calculations
+
+### Example Use Cases
+
+**Find your best performers:**
+```python
+portfolio.print_stock_returns(date(2023, 1, 1), date(2023, 12, 31), sort_by="return")
+```
+
+**Compare quarterly performance:**
+```python
+q1_returns = portfolio.get_stock_returns(date(2023, 1, 1), date(2023, 3, 31))
+q2_returns = portfolio.get_stock_returns(date(2023, 4, 1), date(2023, 6, 30))
+```
+
+**Identify underperformers:**
+```python
+returns = portfolio.get_stock_returns(date(2023, 1, 1), date(2023, 12, 31))
+losers = {k: v for k, v in returns.items() if v < 0}
+print(f"Stocks with negative returns: {losers}")
+```
 
 ## Next Steps
 
@@ -317,3 +493,4 @@ portfolio = FinTrack(
 - Read the [CHANGELOG.md](CHANGELOG.md) for latest updates
 - Configure logging as described above
 - Review error messages in the logs for troubleshooting
+- Try the new stock returns analysis methods to understand your holdings better

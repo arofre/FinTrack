@@ -8,13 +8,13 @@ long_description = (this_directory / "README.md").read_text(encoding="utf-8")
 
 setup(
     name="FinTrack",
-    version="1.1.0",
+    version="1.1.1",
     author="Aron Fredriksson",
     author_email="arofre903@gmail.com",
     description="A robust portfolio tracker with multi-currency support",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/arofredriksson/FinTrack",
+    url="https://github.com/arofre/FinTrack",
     license="MIT",
     packages=find_packages(where="src"),
     package_dir={"": "src"},
