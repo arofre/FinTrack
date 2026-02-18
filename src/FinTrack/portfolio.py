@@ -247,10 +247,11 @@ class FinTrack:
         logger.info(f"Fetching index returns for {ticker} from {start_date} to {end_date}")
 
         try:
+            # Add extra days to ensure we get end_date data if available
             df = yf.download(
                 ticker,
                 start=start_date,
-                end=end_date + timedelta(days=1),
+                end=end_date + timedelta(days=3),  # Changed from 1 to 3 days
                 progress=False,
             )
 
@@ -274,7 +275,21 @@ class FinTrack:
                 else:
                     close_prices = df.iloc[:, 0]
 
-            date_range = pd.date_range(start=start_date, end=end_date, freq="D")
+            # NEW: Determine actual available end date
+            actual_end_date = close_prices.index.max().date()
+            
+            # NEW: Use the earlier of requested end_date or actual available data
+            effective_end_date = min(end_date, actual_end_date)
+            
+            # NEW: Log warning if data not available for full range
+            if effective_end_date < end_date:
+                logger.warning(
+                    f"{ticker}: Requested data until {end_date}, but only available until {effective_end_date}. "
+                    f"This is normal if markets haven't closed yet or data hasn't been published."
+                )
+            
+            # CHANGED: Use effective_end_date instead of end_date
+            date_range = pd.date_range(start=start_date, end=effective_end_date, freq="D")
             
             close_prices = close_prices.reindex(date_range)
 
@@ -293,7 +308,8 @@ class FinTrack:
 
             returns = change.values.flatten().tolist()
 
-            logger.debug(f"Retrieved {len(returns)} daily returns for {ticker}")
+            # CHANGED: Updated log message to include effective_end_date
+            logger.info(f"Retrieved {len(returns)} daily returns for {ticker} (from {start_date} to {effective_end_date})")
             return returns
 
         except DataFetchError:
@@ -406,7 +422,9 @@ class FinTrack:
                     period_transactions["Ticker"] == ticker
                 ]
                 
-                net_invested = 0
+                total_bought = 0
+                total_sold = 0
+                
                 for _, transaction in ticker_transactions.iterrows():
                     trans_date = transaction["Date"]
                     trans_price = get_price(ticker, trans_date, self.user_id)
@@ -418,34 +436,40 @@ class FinTrack:
                     cash_flow = amount * trans_price
                     
                     if transaction["Type"] == "Buy":
-                        net_invested += cash_flow
+                        total_bought += cash_flow
                     else:
-                        net_invested -= cash_flow 
+                        total_sold += cash_flow
 
-                
-                if end_value == 0 and start_value > 0:
-                    sale_proceeds = -net_invested
-                    stock_return = (sale_proceeds - start_value) / start_value if start_value > 0 else 0
-                    returns[ticker] = stock_return
-                    logger.debug(
-                        f"{ticker}: Complete exit - Start=${start_value:.2f}, "
-                        f"Sold for=${sale_proceeds:.2f}, Return={stock_return:.2%}"
-                    )
-                
-                elif start_value > 0 or net_invested > 0:
-                    denominator = start_value + net_invested
+                if end_value == 0 and (start_value > 0 or total_bought > 0):
+                    total_invested = start_value + total_bought
+                    proceeds = total_sold
                     
-                    if denominator != 0:
-                        stock_return = (end_value - start_value - net_invested) / denominator
+                    if total_invested > 0:
+                        stock_return = (proceeds - total_invested) / total_invested
                         returns[ticker] = stock_return
                         logger.debug(
-                            f"{ticker}: Start=${start_value:.2f}, Invested=${net_invested:.2f}, "
-                            f"End=${end_value:.2f}, Return={stock_return:.2%}"
+                            f"{ticker}: Complete exit - Invested=${total_invested:.2f}, "
+                            f"Proceeds=${proceeds:.2f}, Return={stock_return:.2%}"
                         )
-                    elif end_value > 0:
-                        stock_return = (end_value - net_invested) / net_invested if net_invested > 0 else 0
+                
+                elif start_value > 0 or total_bought > 0:
+
+                    net_investment = total_bought - total_sold
+                    capital_at_risk = start_value + net_investment
+                    
+                    if capital_at_risk > 0:
+                        gain_loss = end_value - start_value - net_investment
+                        stock_return = gain_loss / capital_at_risk
                         returns[ticker] = stock_return
-                        logger.debug(f"{ticker}: New position, Return={stock_return:.2%}")
+                        logger.debug(
+                            f"{ticker}: Start=${start_value:.2f}, Bought=${total_bought:.2f}, "
+                            f"Sold=${total_sold:.2f}, End=${end_value:.2f}, Return={stock_return:.2%}"
+                        )
+                    elif end_value > 0 and total_bought > 0:
+
+                        stock_return = (end_value + total_sold - total_bought - start_value) / (start_value + total_bought)
+                        returns[ticker] = stock_return
+                        logger.debug(f"{ticker}: Playing with house money, Return={stock_return:.2%}")
 
             except Exception as e:
                 logger.warning(f"Could not calculate return for {ticker}: {e}")
@@ -479,7 +503,7 @@ class FinTrack:
         returns = self.get_stock_returns(from_date, to_date)
         
         if not returns:
-            print("No returns data available for the specified period.")
+            return("No returns data available for the specified period.")
             return
 
         ticker_names = {}
@@ -490,9 +514,9 @@ class FinTrack:
                 ticker_names[ticker] = long_name
             except Exception:
                 ticker_names[ticker] = ticker
-
-        print(f"\nStock Returns ({from_date} to {to_date})")
-        print("=" * 50)
+        r_str = ""
+        r_str += (f"\nStock Returns ({from_date} to {to_date})\n")
+        r_str += ("=" * 50 + "\n")
 
         if sort_by == "return":
             sorted_items = sorted(returns.items(), key=lambda x: x[1], reverse=True)
@@ -505,13 +529,13 @@ class FinTrack:
             name = ticker_names[ticker]
             if len(name) > 40:
                 name = name[:37] + "..."
-            print(f"{name:<40} {ret:>7.2%}")
+            r_str += (f"{name:<40} {ret:>7.2%}\n")
         
-        print("=" * 50)
+        r_str += ("=" * 50 + "\n")
         
         avg_return = sum(returns.values()) / len(returns) if returns else 0
-        print(f"Average Return: {avg_return:>7.2%}")
-        print()
+        r_str += (f"Average Return: {avg_return:>7.2%}")
+        return r_str
 
     def __repr__(self) -> str:
         """Return string representation of portfolio."""
