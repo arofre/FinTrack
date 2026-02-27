@@ -53,10 +53,10 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/arofredriksson/FinTrack"
-"Bug Reports" = "https://github.com/arofredriksson/FinTrack/issues"
-Source = "https://github.com/arofredriksson/FinTrack"
-Documentation = "https://github.com/arofredriksson/FinTrack/wiki"
+Homepage = "https://github.com/arofre/FinTrack"
+"Bug Reports" = "https://github.com/arofre/FinTrack/issues"
+Source = "https://github.com/arofre/FinTrack"
+Documentation = "https://github.com/arofre/FinTrack/wiki"
 
 [tool.black]
 line-length = 100
