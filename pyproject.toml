@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "FinTrack"
-version = "1.1.1"
-description = "A robust portfolio tracker with multi-currency support"
+version = "1.2.0"
+description = "A robust portfolio tracker with multi-currency support and short selling"
 readme = "README.md"
 requires-python = ">=3.8"
 license = { text = "MIT" }
@@ -18,7 +18,8 @@ keywords = [
     "finance",
     "tracking",
     "investment",
-    "multi-currency"
+    "multi-currency",
+    "short selling",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",

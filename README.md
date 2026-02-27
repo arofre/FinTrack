@@ -4,21 +4,22 @@
 [![Python](https://img.shields.io/badge/python-3.8+-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-A Python package for tracking and analyzing stock portfolios with multi-currency support and automatic dividend tracking.
+A Python package for tracking and analyzing stock portfolios with multi-currency support, automatic dividend tracking, and short selling.
 
 ## Important note
 
-Tests, instructions and docstrings written using Claude, I tried to find any incorrect information but some may have slipped through the crack. 
+Tests, instructions and docstrings written using Claude, I tried to find any incorrect information but some may have slipped through the crack.
 
 ## Features
 
 - **Portfolio Management**: Track multiple stock holdings with buy/sell transactions
+- **Short Selling**: Open and close short positions with mark-to-market daily valuation
 - **Dynamic Price Tracking**: Automatically fetch and store historical stock prices using yfinance
 - **Multi-Currency Support**: Handle stocks traded in different currencies with automatic conversion
-- **Cash Management**: Maintain accurate cash balances accounting for buy/sell transactions and dividend payments
-- **Dividend Tracking**: Automatically capture and account for dividend payments
+- **Cash Management**: Maintain accurate cash balances accounting for all transaction types and dividend payments
+- **Dividend Tracking**: Automatically capture and account for dividend payments (long positions only)
 - **Historical Analysis**: Query portfolio composition and value at any point in time
-- **Stock Returns Analysis**: Calculate individual stock performance accounting for position changes
+- **Stock Returns Analysis**: Calculate individual stock performance including short positions
 - **Index Comparison**: Compare your portfolio returns against benchmark indices
 - **Comprehensive Logging**: Track all operations with detailed logging
 - **Input Validation**: Validate all transaction data before processing
@@ -49,6 +50,9 @@ Date;Ticker;Type;Amount;Price
 2023-01-15;AAPL;Buy;10;150.00
 2023-02-20;MSFT;Buy;5;250.00
 2023-03-10;AAPL;Sell;5;165.00
+2023-04-05;TSLA;Buy;2;800.00
+2023-06-01;TSLA;Short;3;290.00
+2023-09-15;TSLA;Cover;3;240.00
 ```
 
 ### 2. Initialize and Query
@@ -67,11 +71,11 @@ portfolio = FinTrack(
 # Update with latest data
 portfolio.update_portfolio()
 
-# Get current holdings
+# Get current holdings (short positions prefixed with "Short: ")
 holdings = portfolio.get_current_holdings()
 print(f"Holdings: {holdings}")
 
-# Get portfolio value over time
+# Get portfolio value over time (shorts valued mark-to-market)
 values = portfolio.get_portfolio_value(
     date(2023, 1, 1),
     date(2023, 12, 31)
@@ -80,6 +84,40 @@ values = portfolio.get_portfolio_value(
 # Get portfolio summary
 summary = portfolio.get_portfolio_summary()
 print(f"Total Value: {summary['total_value']:,.2f} {summary['currency']}")
+```
+
+## CSV Format
+
+**Delimiter:** Semicolon (`;`)
+
+**Required columns:**
+
+| Column | Type    | Description               |
+|--------|---------|---------------------------|
+| Date   | YYYY-MM-DD | Transaction date       |
+| Ticker | String  | Stock ticker symbol       |
+| Type   | Buy/Sell/Short/Cover | Transaction type |
+| Amount | Integer | Number of shares          |
+| Price  | Number  | Price per share           |
+
+**Transaction type effects:**
+
+| Type  | Shares      | Cash                    |
+|-------|-------------|-------------------------|
+| Buy   | +shares     | −(shares × price)       |
+| Sell  | −shares     | +(shares × price)       |
+| Short | −shares     | +(shares × price)       |
+| Cover | +shares     | −(shares × price)       |
+
+**Example:**
+```csv
+Date;Ticker;Type;Amount;Price
+2023-01-15;AAPL;Buy;10;150.50
+2023-02-20;MSFT;Buy;5;250.75
+2023-03-10;AAPL;Sell;5;165.25
+2023-04-05;TSLA;Buy;2;800.00
+2023-06-01;NVDA;Short;4;420.00
+2023-11-01;NVDA;Cover;4;460.00
 ```
 
 ## Documentation
@@ -100,98 +138,66 @@ Initialize a portfolio tracker.
 - `ValidationError`: If parameters are invalid
 
 #### `get_current_holdings() -> List[str]`
-Get list of current stock holdings with company names.
+Get list of current stock holdings with company names. Short positions are prefixed with `"Short: "`.
 
 #### `get_portfolio_value(from_date, to_date) -> Dict[date, float]`
 Get portfolio value for each day in date range.
 
+For short positions, value = cash (including short proceeds) + (negative_shares × current_price), which equals the unrealized P&L on the short automatically.
+
 #### `get_portfolio_cash(date) -> Optional[float]`
-Get cash balance on specific date.
+Get cash balance on specific date. Cash includes proceeds received from short sales.
 
 #### `get_portfolio_summary() -> Dict`
-Get comprehensive portfolio summary including:
-- Current holdings with prices and values
-- Cash balance
-- Total portfolio value
+Get comprehensive portfolio summary. Holdings include an `is_short` boolean field. Short positions show negative `shares` and `value`.
 
 #### `get_stock_returns(from_date, to_date) -> Dict[str, float]`
-**New in v1.1.1**: Calculate returns for each stock held during the period.
+Calculate returns for each stock held during the period, including short positions.
 
-Accounts for position changes (buys/sells) during the period using a Modified Dietz-style calculation. This method properly handles:
-- Stocks held throughout the entire period
-- Stocks purchased during the period
-- Stocks sold during the period
-- Partial position changes
+- **Long positions**: standard return on invested capital
+- **Short positions**: return = (proceeds − cover cost) / cover cost
+- **Mixed activity**: Modified Dietz-style approach
 
-**Parameters:**
-- `from_date`: Start date
-- `to_date`: End date
-
-**Returns:**
-- Dictionary mapping ticker symbols to returns (as decimals, e.g., 0.062 = 6.2%)
-
-**Example:**
-```python
-returns = portfolio.get_stock_returns(
-    date(2023, 1, 1),
-    date(2023, 12, 31)
-)
-for ticker, ret in returns.items():
-    print(f"{ticker}: {ret:.2%}")
-```
+**Returns:** Dictionary mapping ticker symbols to returns (e.g., 0.062 = 6.2%, −0.05 = −5%)
 
 #### `print_stock_returns(from_date, to_date, sort_by='return')`
-**New in v1.1.1**: Print a formatted table of stock returns.
-
-**Parameters:**
-- `from_date`: Start date
-- `to_date`: End date
-- `sort_by`: How to sort results - "return" (default), "ticker", or "alpha"
-
-**Example:**
-```python
-portfolio.print_stock_returns(
-    date(2023, 1, 1),
-    date(2023, 12, 31)
-)
-# Output:
-# Stock Returns (2023-01-01 to 2023-12-31)
-# ==================================================
-# Apple Inc.                                12.50%
-# Microsoft Corporation                      8.23%
-# Tesla, Inc.                               -5.12%
-# ==================================================
-# Average Return:                            5.20%
-```
+Print a formatted table of stock returns. Open short positions are labelled with `(Short)`.
 
 #### `get_index_returns(ticker, start_date, end_date) -> List[float]`
-Get daily returns for a benchmark index. **Improved in v1.1.1** with more robust data handling and better error recovery.
-
-Returns are calculated as (price - initial_price) / initial_price.
-
-**Parameters:**
-- `ticker`: Yahoo Finance ticker (e.g., '^GSPC' for S&P 500)
-- `start_date`: Start date
-- `end_date`: End date
-
-**Returns:**
-- List of daily returns (as decimals, e.g., 0.02 = 2%)
-
-**Raises:**
-- `DataFetchError`: If index data cannot be fetched
-
-**Example:**
-```python
-returns = portfolio.get_index_returns(
-    '^GSPC',
-    date(2023, 1, 1),
-    date(2023, 12, 31)
-)
-print(f"S&P 500 final return: {returns[-1]:.2%}")
-```
+Get daily returns for a benchmark index relative to start price.
 
 #### `update_portfolio()`
 Refresh portfolio with latest data from Yahoo Finance.
+
+### Short Selling — How It Works
+
+#### Opening a short (`Type=Short`)
+- Holdings for that ticker decrease by the shorted amount (goes negative)
+- Cash increases by `shares × price` (simplified — proceeds credited immediately)
+- Prices are fetched for the ticker throughout the short period
+
+#### Closing a short (`Type=Cover`)
+- Holdings for that ticker increase by the covered amount (back toward zero)
+- Cash decreases by `shares × price` (cost to buy back)
+
+#### Daily valuation of open shorts
+Because short proceeds were already credited to cash, the portfolio value calculation is:
+
+```
+value = cash + Σ(shares × price)
+```
+
+Since shorted shares are negative, their contribution is negative — i.e., the current cost-to-cover is subtracted from cash. The net result is the unrealized P&L:
+
+```
+unrealized P&L = proceeds_received − current_cost_to_cover
+```
+
+**Example:** Short 10 shares of TSLA at $300 → cash +$3,000. If today's price is $260:
+```
+contribution = -10 × $260 = -$2,600
+net = $3,000 (cash) - $2,600 = +$400 unrealized gain ✓
+```
 
 ### Configuration
 
@@ -208,49 +214,28 @@ Data is stored in user's home directory:
     └── fintrack.log           # Activity log
 ```
 
-Access paths programmatically:
-```python
-from FinTrack import Config
-
-data_dir = Config.get_data_dir("user123")
-db_path = Config.get_db_path("user123")
-logs_dir = Config.get_logs_dir()
-```
-
 ### Logging
-
-FinTrack uses Python's standard logging module:
 
 ```python
 from FinTrack import setup_logger, get_logger
 import logging
 
-# Set up with custom level
 logger = setup_logger("my_app", level=logging.DEBUG)
-
-# Or get existing logger
-logger = get_logger(__name__)
-
 logger.info("Portfolio initialized")
-logger.debug("Detailed debug information")
-logger.warning("Warning about something")
-logger.error("An error occurred")
 ```
 
 Logs are written to `~/.fintrack/logs/fintrack.log` by default.
 
 ### Error Handling
 
-FinTrack provides specific exception types:
-
 ```python
 from FinTrack import (
-    FinTrackError,        # Base exception
-    ValidationError,      # Input validation failed
-    DataFetchError,       # Yahoo Finance fetch failed
-    PriceError,          # Price data unavailable
-    DatabaseError,       # Database operation failed
-    ConfigError          # Configuration issue
+    FinTrackError,
+    ValidationError,
+    DataFetchError,
+    PriceError,
+    DatabaseError,
+    ConfigError,
 )
 
 try:
@@ -263,10 +248,8 @@ except FinTrackError as e:
 
 ### Input Validation
 
-All transaction data is automatically validated:
-
 ```python
-from FinTrack import TransactionValidator, ValidationError
+from FinTrack import TransactionValidator
 
 df = pd.read_csv("transactions.csv", sep=";")
 is_valid, errors = TransactionValidator.validate_dataframe(df)
@@ -278,36 +261,10 @@ if not is_valid:
 
 Validation checks:
 - ✓ Date format (YYYY-MM-DD)
-- ✓ Ticker symbols (non-empty, alphanumeric)
-- ✓ Transaction type (Buy or Sell)
+- ✓ Ticker symbols (non-empty)
+- ✓ Transaction type (Buy, Sell, Short, or Cover)
 - ✓ Amount (positive integer)
 - ✓ Price (positive number)
-
-## CSV Format
-
-**Delimiter:** Semicolon (`;`)
-
-**Required columns:**
-| Column | Type | Description |
-|--------|------|-------------|
-| Date | YYYY-MM-DD | Transaction date |
-| Ticker | String | Stock ticker symbol |
-| Type | Buy/Sell | Transaction type |
-| Amount | Integer | Number of shares |
-| Price | Number | Price per share |
-
-**Optional columns:**
-- Custom price specifications (to override Yahoo Finance data)
-- Additional metadata
-
-**Example:**
-```csv
-Date;Ticker;Type;Amount;Price
-2023-01-15;AAPL;Buy;10;150.50
-2023-02-20;MSFT;Buy;5;250.75
-2023-03-10;AAPL;Sell;5;165.25
-2023-04-05;TSLA;Buy;2;800.00
-```
 
 ## How It Works
 
@@ -315,49 +272,39 @@ Date;Ticker;Type;Amount;Price
 
 FinTrack uses SQLite with three main tables:
 
-1. **portfolio**: Holdings for each date
-2. **cash**: Cash balance tracking
-3. **prices**: Daily stock prices in base currency
+1. **portfolio**: Holdings per date (positive = long, negative = short)
+2. **cash**: Cash balance tracking (includes short sale proceeds)
+3. **prices**: Daily stock prices in base currency (fetched for all open positions)
 
 ### Price Management
 
-- Prices automatically fetched from Yahoo Finance
+- Prices automatically fetched from Yahoo Finance for all non-zero positions (long and short)
 - Multi-currency portfolios: prices converted to base currency
 - Forward-filling for missing trading days
 - Custom prices from CSV supported
 
 ### Cash Flow Tracking
 
-Cash balance updated for:
-- Stock purchases (deduct)
-- Stock sales (add)
-- Dividend payments (add)
+| Event          | Cash effect     |
+|----------------|-----------------|
+| Buy stock      | Decreases       |
+| Sell stock     | Increases       |
+| Short stock    | Increases       |
+| Cover short    | Decreases       |
+| Dividend       | Increases (long positions only) |
 
 ### Stock Returns Calculation
 
-The `get_stock_returns()` method uses a Modified Dietz approach to calculate time-weighted returns that account for:
-- Initial position value
-- Cash flows (buys/sells) during the period
-- Timing of transactions
-- Final position value
-
-This provides accurate performance metrics even when position sizes change during the analysis period.
+Returns use a Modified Dietz approach treating all cash outflows (Buy, Cover) and inflows (Sell, Short) consistently, giving accurate performance metrics regardless of position type or how many times shares changed hands during the period.
 
 ## Supported Currencies
 
-Works with any currency pair available on Yahoo Finance:
-
 ```python
-# Major currencies
 portfolio = FinTrack(100000, "USD")  # US Dollar
 portfolio = FinTrack(100000, "EUR")  # Euro
 portfolio = FinTrack(100000, "GBP")  # British Pound
 portfolio = FinTrack(100000, "JPY")  # Japanese Yen
 portfolio = FinTrack(100000, "SEK")  # Swedish Krona
-
-# Emerging markets and others available
-portfolio = FinTrack(100000, "INR")  # Indian Rupee
-portfolio = FinTrack(100000, "BRL")  # Brazilian Real
 ```
 
 ## Requirements
@@ -371,42 +318,28 @@ portfolio = FinTrack(100000, "BRL")  # Brazilian Real
 ### Running Tests
 
 ```bash
-# Run all tests
 pytest tests/
-
-# With coverage
 pytest tests/ --cov=src/FinTrack --cov-report=html
-
-# Specific test file
 pytest tests/test_validation.py
-
-# Specific test
-pytest tests/test_validation.py::TestTransactionValidator::test_valid_transaction_row
 ```
 
 ### Code Quality
 
 ```bash
-# Format code
 black src/
-
-# Lint
 flake8 src/
-
-# Type checking
 mypy src/
 ```
 
 ## Limitations
 
-- Prices are fetched from Yahoo Finance; verify data quality
+- Prices fetched from Yahoo Finance — verify data quality
 - Daily resolution only (intra-day trading not supported)
+- Short selling uses a simplified cash model (proceeds credited immediately, no margin requirements)
 - Corporate actions (stock splits, mergers) must be manually adjusted
 - Past dividend data depends on Yahoo Finance records
 
 ## Contributing
-
-Contributions are welcome! Please:
 
 1. Fork the repository
 2. Create a feature branch
@@ -416,11 +349,11 @@ Contributions are welcome! Please:
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) file for details.
+MIT License — see [LICENSE](LICENSE) for details.
 
 ## Disclaimer
 
-This software is provided as-is for educational and informational purposes. Always verify your portfolio calculations independently. The author is not responsible for any financial losses resulting from use of this software.
+This software is provided as-is for educational and informational purposes. Always verify your portfolio calculations independently. The short selling implementation uses a simplified cash model and does not account for margin requirements, borrowing costs, or broker-specific rules. The author is not responsible for any financial losses resulting from use of this software.
 
 ## Changelog
 
@@ -428,12 +361,12 @@ See [CHANGELOG.md](CHANGELOG.md) for detailed release notes.
 
 ## Support
 
-For issues, questions, or suggestions:
 - [GitHub Issues](https://github.com/arofredriksson/FinTrack/issues)
 - Email: arofre903@gmail.com
 
 ## Version History
 
+- **v1.2.0** (2026-02-18): Short selling support (Short/Cover transaction types, mark-to-market valuation)
 - **v1.1.1** (2026-02-15): Added stock returns analysis methods and improved index returns handling
 - **v1.1.0** (2026-02-14): Major refactoring with full test suite, proper error handling, logging, and pandas 2.0 compatibility
 - **v1.0.0** (2026-02-13): Initial release

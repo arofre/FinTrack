@@ -25,7 +25,14 @@ def build_holding_table(csv_file: str, user_id: Optional[str] = None) -> None:
     Parse transactions CSV and create portfolio holdings table.
 
     Creates a SQLite table tracking the number of shares held for each
-    ticker on each transaction date.
+    ticker on each transaction date. Short positions are represented as
+    negative share counts.
+
+    Transaction type effects on holdings:
+        - Buy:   +shares (long position)
+        - Sell:  -shares (reduce long position)
+        - Short: -shares (open short position, results in negative count)
+        - Cover: +shares (close short position)
 
     Args:
         csv_file: Path to transactions CSV file
@@ -64,11 +71,17 @@ def build_holding_table(csv_file: str, user_id: Optional[str] = None) -> None:
                 transactions = df[(df["Ticker"] == ticker) & (df["Date"] <= date_val)]
 
                 if len(transactions) > 0:
-                    buys = transactions[transactions["Type"] == "Buy"]["Amount"].sum()
-                    sells = transactions[transactions["Type"] == "Sell"]["Amount"].sum()
-                    holdings = buys - sells
+                    # Buy and Cover both increase share count
+                    # Sell and Short both decrease share count
+                    inflows = transactions[
+                        transactions["Type"].isin(["Buy", "Cover"])
+                    ]["Amount"].sum()
+                    outflows = transactions[
+                        transactions["Type"].isin(["Sell", "Short"])
+                    ]["Amount"].sum()
+                    holdings = inflows - outflows
 
-                    if holdings > 0:
+                    if holdings != 0:
                         row[ticker] = holdings
                     else:
                         row[ticker] = None
@@ -100,12 +113,15 @@ def get_portfolio(target_date: date, user_id: Optional[str] = None) -> Dict[str,
     """
     Get portfolio holdings on a specific date.
 
+    Positive values represent long positions; negative values represent
+    open short positions.
+
     Args:
         target_date: Date to query
         user_id: Optional user identifier
 
     Returns:
-        Dictionary mapping ticker symbols to share counts
+        Dictionary mapping ticker symbols to share counts (negative = short)
 
     Raises:
         DatabaseError: If database query fails
@@ -113,7 +129,7 @@ def get_portfolio(target_date: date, user_id: Optional[str] = None) -> Dict[str,
     Example:
         >>> portfolio = get_portfolio(date(2023, 6, 15))
         >>> portfolio
-        {'AAPL': 10, 'MSFT': 5}
+        {'AAPL': 10, 'MSFT': 5, 'TSLA': -3}  # TSLA is a short position
     """
     if isinstance(target_date, str):
         target_date = pd.to_datetime(target_date).date()
@@ -139,13 +155,17 @@ def get_portfolio(target_date: date, user_id: Optional[str] = None) -> Dict[str,
 
             row = result.iloc[0]
 
+            # Include both long (positive) and short (negative) positions
             holdings = {
                 ticker: int(shares)
                 for ticker, shares in row.items()
-                if ticker != "Date" and shares > 0
+                if ticker != "Date" and shares != 0
             }
 
-            holdings = dict(sorted(holdings.items(), key=lambda x: x[1], reverse=True))
+            # Sort: longs descending by size first, then shorts ascending
+            holdings = dict(
+                sorted(holdings.items(), key=lambda x: x[1], reverse=True)
+            )
 
             return holdings
 
@@ -161,6 +181,8 @@ def get_cash_balance(
     Get cash balance on a specific date.
 
     Returns the most recent cash balance on or before the target date.
+    Note: Short sale proceeds are added to cash when the short is opened
+    (simplified model).
 
     Args:
         target_date: Date to query
@@ -273,6 +295,14 @@ def build_cash_table(
     Processes transactions and dividend payments to maintain accurate
     cash balance over time.
 
+    Cash flow rules:
+        - Buy:   cash decreases (paying for shares)
+        - Sell:  cash increases (receiving proceeds)
+        - Short: cash increases (receiving short-sale proceeds)
+        - Cover: cash decreases (paying to buy back shares)
+
+    Dividends are only paid on long (positive) positions.
+
     Args:
         csv_file: Path to transactions CSV
         initial_cash: Starting cash amount
@@ -362,6 +392,7 @@ def build_cash_table(
 
             logger.debug("Checking for dividends...")
             for ticker in tickers:
+                # Only pay dividends on long (positive) positions
                 holdings_after = portfolio_df[
                     (portfolio_df["Date"] > last_processed_date) & (portfolio_df[ticker] > 0)
                 ]
@@ -377,6 +408,7 @@ def build_cash_table(
                                 div_date = div_date.date()
 
                                 holdings = get_portfolio(div_date, user_id)
+                                # Only credit dividend if holding a long position
                                 if ticker in holdings and holdings[ticker] > 0:
                                     events.append(
                                         {
@@ -429,6 +461,18 @@ def build_cash_table(
                             current_balance += transaction_value
                             logger.debug(
                                 f"  {event_date} - Sell: {amount} shares of {ticker} at {price:.2f} {portfolio_currency} = +{transaction_value:.2f} {portfolio_currency}"
+                            )
+                        elif trans_type == "Short":
+                            # Receive short-sale proceeds
+                            current_balance += transaction_value
+                            logger.debug(
+                                f"  {event_date} - Short: {amount} shares of {ticker} at {price:.2f} {portfolio_currency} = +{transaction_value:.2f} {portfolio_currency} (short proceeds)"
+                            )
+                        elif trans_type == "Cover":
+                            # Pay to buy back shorted shares
+                            current_balance -= transaction_value
+                            logger.debug(
+                                f"  {event_date} - Cover: {amount} shares of {ticker} at {price:.2f} {portfolio_currency} = -{transaction_value:.2f} {portfolio_currency} (cover cost)"
                             )
 
                         cursor.execute(
@@ -554,6 +598,8 @@ def generate_price_table(
     Generate price table with daily stock prices.
 
     Fetches prices from Yahoo Finance and converts to portfolio currency.
+    Prices are fetched for both long and short positions, since mark-to-market
+    valuation requires current prices for all open positions.
 
     Args:
         portfolio_currency: Base currency code
@@ -671,7 +717,8 @@ def generate_price_table(
                     else:
                         period_end = end_date
 
-                    if holdings > 0:
+                    # Fetch prices for both long (positive) and short (negative) positions
+                    if holdings != 0:
                         period_start = max(date_val, start_date)
                         period_end = min(period_end + timedelta(days=1), end_date)
 
@@ -774,28 +821,34 @@ def get_current_holdings_longnames(user_id: Optional[str] = None) -> List[str]:
     """
     Get current holdings with long company names.
 
+    Includes both long and short positions. Short positions are prefixed
+    with "Short: " to make them identifiable.
+
     Args:
         user_id: Optional user identifier
 
     Returns:
-        List of company long names
+        List of company long names (short positions prefixed with "Short: ")
 
     Example:
         >>> holdings = get_current_holdings_longnames()
         >>> holdings
-        ['Apple Inc.', 'Microsoft Corporation']
+        ['Apple Inc.', 'Microsoft Corporation', 'Short: Tesla, Inc.']
     """
     current_portfolio = get_portfolio(datetime.today().date(), user_id)
     holdings_with_names = []
 
-    for ticker in current_portfolio.keys():
+    for ticker, shares in current_portfolio.items():
         try:
             yf_ticker = yf.Ticker(ticker)
             long_name = yf_ticker.info.get("longName", ticker)
+            if shares < 0:
+                long_name = f"Short: {long_name}"
             holdings_with_names.append(long_name)
         except Exception as e:
             logger.warning(f"Could not fetch long name for {ticker}: {e}")
-            holdings_with_names.append(ticker)
+            label = f"Short: {ticker}" if shares < 0 else ticker
+            holdings_with_names.append(label)
 
     return holdings_with_names
 
@@ -835,5 +888,3 @@ def get_past_holdings_longnames(user_id: Optional[str] = None) -> List[str]:
             holdings_with_names.append(ticker)
 
     return holdings_with_names
-
-

@@ -8,10 +8,10 @@ long_description = (this_directory / "README.md").read_text(encoding="utf-8")
 
 setup(
     name="FinTrack",
-    version="1.1.1",
+    version="1.2.0",
     author="Aron Fredriksson",
     author_email="arofre903@gmail.com",
-    description="A robust portfolio tracker with multi-currency support",
+    description="A robust portfolio tracker with multi-currency support and short selling",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/arofre/FinTrack",
@@ -49,9 +49,9 @@ setup(
         ],
     },
     project_urls={
-        "Bug Reports": "https://github.com/arofredriksson/FinTrack/issues",
-        "Source": "https://github.com/arofredriksson/FinTrack",
-        "Documentation": "https://github.com/arofredriksson/FinTrack/wiki",
+        "Bug Reports": "https://github.com/arofre/FinTrack/issues",
+        "Source": "https://github.com/arofre/FinTrack",
+        "Documentation": "https://github.com/arofre/FinTrack/wiki",
     },
     include_package_data=True,
     zip_safe=False,

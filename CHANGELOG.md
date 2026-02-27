@@ -5,9 +5,61 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-02-18
+
+### Added
+
+- **Short Selling Support**
+  - New transaction types `Short` and `Cover` accepted in the CSV
+  - Short positions tracked as negative share counts in the holdings table
+  - `get_portfolio()` returns negative values for open short positions
+  - `get_current_holdings()` prefixes short positions with `"Short: "` (e.g., `"Short: Tesla, Inc."`)
+  - `get_portfolio_summary()` includes an `is_short` field on each holding
+
+- **Mark-to-Market Valuation for Shorts**
+  - `get_portfolio_value()` correctly values open shorts daily
+  - Short sale proceeds are added to cash when the position is opened
+  - Daily value = cash (including proceeds) + (negative shares × current price)
+  - Net effect: unrealized P&L on the short is reflected automatically
+
+- **Short Returns Calculation**
+  - `get_stock_returns()` handles Short/Cover cash flows alongside Buy/Sell
+  - Closed short return = (proceeds − cover cost) / cover cost
+  - Open short return uses Modified Dietz-style approach consistent with long positions
+  - `print_stock_returns()` labels open short positions with `(Short)`
+
+- **Price Fetching for Short Periods**
+  - `generate_price_table()` now fetches prices for short (negative) positions in addition to long ones
+
+### Changed
+
+- `build_holding_table`: Short and Sell both reduce share counts; Cover and Buy both increase them. Non-zero negative holdings (open shorts) are now preserved in the database.
+- `build_cash_table`: Short transactions increase cash (proceeds received); Cover transactions decrease cash (cost to buy back).
+- Dividend logic unchanged — dividends are only credited for long (positive) positions.
+
+### CSV Format
+
+Two new valid values for the `Type` column:
+
+| Type   | Effect on shares | Effect on cash          |
+|--------|-----------------|-------------------------|
+| Buy    | +shares         | −(shares × price)       |
+| Sell   | −shares         | +(shares × price)       |
+| Short  | −shares         | +(shares × price)       |
+| Cover  | +shares         | −(shares × price)       |
+
+**Example:**
+```csv
+Date;Ticker;Type;Amount;Price
+2026-01-10;TSLA;Short;5;350.00
+2026-02-05;TSLA;Cover;5;310.00
+```
+
+---
+
 ## [1.1.1] - 2026-02-15
 
-## Changes
+### Changes
 
 Changed some inconsistencies in the the gathering of index returns and added function for getting summaries between dates.
 
@@ -15,7 +67,7 @@ Changed some inconsistencies in the the gathering of index returns and added fun
 
 ### Major Changes
 
-This is a comprehensive rewrite addressing all code quality, documentation, and reliability issues found in v1.0.0. Tests, instructions and docstrings added using Claude, tried to find any incorrect information but some may have slipped through the crack. 
+This is a comprehensive rewrite addressing all code quality, documentation, and reliability issues found in v1.0.0. Tests, instructions and docstrings added using Claude, tried to find any incorrect information but some may have slipped through the crack.
 
 ### Added
 
@@ -180,37 +232,25 @@ None
 
 ---
 
-## Migration from v1.0.0 to v1.1.0
+## Migration Notes
 
-### Breaking Changes
+### v1.1.x → v1.2.0
 
-None - API is backward compatible. However, database location has changed:
+No breaking changes. Existing portfolios with only `Buy`/`Sell` transactions work identically.
 
-**v1.0.0:** `./portfolio.db` (current directory)
-**v1.1.0:** `~/.fintrack/default/data/portfolio.db` (user home directory)
+To use short selling, add `Short` and `Cover` rows to your CSV:
 
-### Migration Steps
+```csv
+Date;Ticker;Type;Amount;Price
+2026-01-10;TSLA;Short;5;350.00
+2026-02-05;TSLA;Cover;5;310.00
+```
+
+### v1.0.0 → v1.1.0
 
 1. Update import: `from portfolio_tracker import Portfolio_tracker` → `from FinTrack import FinTrack`
 2. Update class name if used directly: `Portfolio_tracker` → `FinTrack`
 3. Optional: Copy old `portfolio.db` to new location if needed
-
-```python
-# Old code (v1.0.0)
-from portfolio_tracker import Portfolio_tracker
-portfolio = Portfolio_tracker(150000, "SEK", "transactions.csv")
-
-# New code (v1.1.0)
-from FinTrack import FinTrack
-portfolio = FinTrack(150000, "SEK", "transactions.csv")
-```
-
-### New Features to Explore
-
-- Use `get_portfolio_summary()` for quick overview
-- Check logs in `~/.fintrack/logs/fintrack.log`
-- Enable debug logging with `setup_logger(..., level=logging.DEBUG)`
-- Use user_id for multi-user setups: `FinTrack(..., user_id="alice")`
 
 ---
 

@@ -13,7 +13,7 @@ class TransactionValidator:
     """Validates transaction data from CSV files."""
 
     REQUIRED_COLUMNS = {"Date", "Ticker", "Type", "Amount", "Price"}
-    VALID_TYPES = {"Buy", "Sell"}
+    VALID_TYPES = {"Buy", "Sell", "Short", "Cover"}
 
     @classmethod
     def validate_dataframe(cls, df: pd.DataFrame) -> Tuple[bool, List[str]]:
@@ -84,7 +84,7 @@ class TransactionValidator:
         else:
             if row["Type"] not in cls.VALID_TYPES:
                 errors.append(
-                    f"Type must be 'Buy' or 'Sell', got: {row['Type']}"
+                    f"Type must be 'Buy', 'Sell', 'Short', or 'Cover', got: {row['Type']}"
                 )
 
         # Validate Amount
