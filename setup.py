@@ -8,7 +8,7 @@ long_description = (this_directory / "README.md").read_text(encoding="utf-8")
 
 setup(
     name="FinTrack",
-    version="1.2.0",
+    version="1.2.1",
     author="Aron Fredriksson",
     author_email="arofre903@gmail.com",
     description="A robust portfolio tracker with multi-currency support and short selling",
