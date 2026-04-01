@@ -263,6 +263,7 @@ class FinTrack:
                 ticker,
                 start=start_date,
                 end=end_date + timedelta(days=3),
+                auto_adjust = False,
                 progress=False,
             )
 
@@ -287,15 +288,15 @@ class FinTrack:
                     close_prices = df.iloc[:, 0]
 
             actual_end_date = close_prices.index.max().date()
-            effective_end_date = min(end_date, actual_end_date)
-
-            if effective_end_date < end_date:
+            if actual_end_date < end_date:
                 logger.warning(
-                    f"{ticker}: Requested data until {end_date}, but only available until {effective_end_date}. "
+                    f"{ticker}: Requested data until {end_date}, but only available until {actual_end_date}. "
                     f"This is normal if markets haven't closed yet or data hasn't been published."
                 )
 
-            date_range = pd.date_range(start=start_date, end=effective_end_date, freq="D")
+            # Always reindex to the full requested calendar range and forward-fill
+            # weekends/holidays so the length matches get_portfolio_value output.
+            date_range = pd.date_range(start=start_date, end=end_date, freq="D")
             close_prices = close_prices.reindex(date_range)
             close_prices = close_prices.ffill()
             close_prices = close_prices.bfill()
@@ -310,7 +311,7 @@ class FinTrack:
             change = (close_prices / first_price - 1)
             returns = change.values.flatten().tolist()
 
-            logger.info(f"Retrieved {len(returns)} daily returns for {ticker} (from {start_date} to {effective_end_date})")
+            logger.info(f"Retrieved {len(returns)} daily returns for {ticker} (from {start_date} to {end_date})")
             return returns
 
         except DataFetchError:
