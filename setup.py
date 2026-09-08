@@ -8,7 +8,7 @@ long_description = (this_directory / "README.md").read_text(encoding="utf-8")
 
 setup(
     name="FinTrack",
-    version="1.2.1",
+    version="1.2.3",
     author="Aron Fredriksson",
     author_email="arofre903@gmail.com",
     description="A robust portfolio tracker with multi-currency support and short selling",
@@ -33,7 +33,7 @@ setup(
     python_requires=">=3.8",
     install_requires=[
         "pandas>=1.3.0",
-        "yfinance>=0.2.0",
+        "yfinance>=1.7.0",
     ],
     extras_require={
         "dev": [
