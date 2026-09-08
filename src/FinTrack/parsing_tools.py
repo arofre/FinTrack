@@ -431,6 +431,7 @@ def build_cash_table(
                 return
 
             current_balance = previous_balance
+            ticker_currency_cache: Dict[str, str] = {}
 
             for event in events:
                 event_date = event["date"]
@@ -493,7 +494,11 @@ def build_cash_table(
                     try:
                         total_dividend = div_amount * shares_owned
 
-                        currency = get_currency_from_ticker(ticker)
+                        if ticker in ticker_currency_cache:
+                            currency = ticker_currency_cache[ticker]
+                        else:
+                            currency = get_currency_from_ticker(ticker)
+                            ticker_currency_cache[ticker] = currency
                         if currency != portfolio_currency:
                             exchange_rate = get_exchange_rate(
                                 event_date, event_date, currency, portfolio_currency
@@ -664,6 +669,8 @@ def generate_price_table(
 
             tickers = [col for col in portfolio_df.columns if col != "Date"]
 
+            ticker_currency_cache: Dict[str, str] = {}
+
             for ticker in tickers:
                 logger.debug(f"Processing {ticker}...")
 
@@ -672,7 +679,11 @@ def generate_price_table(
                     logger.debug(f"  Found {len(ticker_spec_prices)} specified prices for {ticker}")
 
                     try:
-                        currency = get_currency_from_ticker(ticker)
+                        if ticker in ticker_currency_cache:
+                            currency = ticker_currency_cache[ticker]
+                        else:
+                            currency = get_currency_from_ticker(ticker)
+                            ticker_currency_cache[ticker] = currency
 
                         for spec_date, spec_price_original in ticker_spec_prices.items():
                             if currency != portfolio_currency:
@@ -745,7 +756,11 @@ def generate_price_table(
                     try:
                         logger.debug(f"  Downloading {ticker} from {period_start} to {period_end}...")
 
-                        currency = get_currency_from_ticker(ticker)
+                        if ticker in ticker_currency_cache:
+                            currency = ticker_currency_cache[ticker]
+                        else:
+                            currency = get_currency_from_ticker(ticker)
+                            ticker_currency_cache[ticker] = currency
 
                         prices_df = yf.download(
                             ticker,
