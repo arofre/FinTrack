@@ -20,6 +20,11 @@ from .yf_tools import (
 logger = get_logger(__name__)
 
 
+def _quote_identifier(identifier: str) -> str:
+    """Quote a SQLite identifier safely."""
+    return f'"{identifier.replace(chr(34), chr(34) * 2)}"'
+
+
 def build_holding_table(csv_file: str, user_id: Optional[str] = None) -> None:
     """
     Parse transactions CSV and create portfolio holdings table.
@@ -59,45 +64,31 @@ def build_holding_table(csv_file: str, user_id: Optional[str] = None) -> None:
         if not is_valid:
             raise ValidationError(f"Invalid transaction data:\n" + "\n".join(errors))
 
-        all_dates = sorted(df["Date"].unique())
-        all_tickers = sorted(df["Ticker"].unique())
+        df = df.sort_values("Date")
 
-        portfolio_data = []
+        signed_amount = df["Amount"] * df["Type"].map(
+            {"Buy": 1, "Cover": 1, "Sell": -1, "Short": -1}
+        )
+        holdings_by_day = (
+            df.assign(SignedAmount=signed_amount)
+            .groupby(["Date", "Ticker"], sort=True)["SignedAmount"]
+            .sum()
+            .unstack(fill_value=0)
+            .sort_index()
+        )
 
-        for date_val in all_dates:
-            row = {"Date": date_val}
-
-            for ticker in all_tickers:
-                transactions = df[(df["Ticker"] == ticker) & (df["Date"] <= date_val)]
-
-                if len(transactions) > 0:
-                    # Buy and Cover both increase share count
-                    # Sell and Short both decrease share count
-                    inflows = transactions[
-                        transactions["Type"].isin(["Buy", "Cover"])
-                    ]["Amount"].sum()
-                    outflows = transactions[
-                        transactions["Type"].isin(["Sell", "Short"])
-                    ]["Amount"].sum()
-                    holdings = inflows - outflows
-
-                    if holdings != 0:
-                        row[ticker] = holdings
-                    else:
-                        row[ticker] = None
-                else:
-                    row[ticker] = None
-
-            portfolio_data.append(row)
-
-        portfolio_df = pd.DataFrame(portfolio_data)
-        portfolio_df_filled = portfolio_df.fillna(0)
+        all_tickers = sorted(holdings_by_day.columns.tolist())
+        portfolio_df_filled = holdings_by_day.cumsum().reset_index()
+        portfolio_df_filled["Date"] = pd.to_datetime(portfolio_df_filled["Date"]).dt.strftime(
+            "%Y-%m-%d"
+        )
 
         db_path = Config.get_db_path(user_id)
         with sqlite3.connect(db_path) as conn:
             cursor = conn.cursor()
             cursor.execute("DROP TABLE IF EXISTS portfolio")
             portfolio_df_filled.to_sql("portfolio", conn, index=False, if_exists="replace")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_portfolio_date ON portfolio(Date)")
             conn.commit()
 
         logger.info(f"Holdings table built successfully with {len(all_tickers)} tickers")
@@ -381,9 +372,9 @@ def build_cash_table(
 
             new_transactions = df[df["Date"] > last_processed_date].sort_values("Date")
 
-            portfolio_df = pd.read_sql_query("SELECT * FROM portfolio", conn)
-            portfolio_df["Date"] = pd.to_datetime(portfolio_df["Date"]).dt.date
-            tickers = [col for col in portfolio_df.columns if col != "Date"]
+            cursor.execute("PRAGMA table_info(portfolio)")
+            columns = cursor.fetchall()
+            tickers = [col[1] for col in columns if col[1] != "Date"]
 
             events = []
 
@@ -392,37 +383,39 @@ def build_cash_table(
 
             logger.debug("Checking for dividends...")
             for ticker in tickers:
-                # Only pay dividends on long (positive) positions
-                holdings_after = portfolio_df[
-                    (portfolio_df["Date"] > last_processed_date) & (portfolio_df[ticker] > 0)
-                ]
+                quoted_ticker = _quote_identifier(ticker)
+                cursor.execute(
+                    f"SELECT 1 FROM portfolio WHERE Date > ? AND {quoted_ticker} > 0 LIMIT 1",
+                    (str(last_processed_date),),
+                )
+                if cursor.fetchone() is None:
+                    continue
 
-                if not holdings_after.empty:
-                    try:
-                        dividends = get_dividends(
-                            last_processed_date + timedelta(days=1), end_date, ticker
-                        )
+                try:
+                    dividends = get_dividends(
+                        last_processed_date + timedelta(days=1), end_date, ticker
+                    )
 
-                        if not dividends.empty:
-                            for div_date, div_amount in dividends.items():
-                                div_date = div_date.date()
+                    if not dividends.empty:
+                        for div_date, div_amount in dividends.items():
+                            div_date = div_date.date()
 
-                                holdings = get_portfolio(div_date, user_id)
-                                # Only credit dividend if holding a long position
-                                if ticker in holdings and holdings[ticker] > 0:
-                                    events.append(
-                                        {
-                                            "date": div_date,
-                                            "type": "dividend",
-                                            "data": {
-                                                "ticker": ticker,
-                                                "amount": div_amount,
-                                                "shares": holdings[ticker],
-                                            },
-                                        }
-                                    )
-                    except Exception as e:
-                        logger.warning(f"Could not fetch dividends for {ticker}: {e}")
+                            holdings = get_portfolio(div_date, user_id)
+                            # Only credit dividend if holding a long position
+                            if ticker in holdings and holdings[ticker] > 0:
+                                events.append(
+                                    {
+                                        "date": div_date,
+                                        "type": "dividend",
+                                        "data": {
+                                            "ticker": ticker,
+                                            "amount": div_amount,
+                                            "shares": holdings[ticker],
+                                        },
+                                    }
+                                )
+                except Exception as e:
+                    logger.warning(f"Could not fetch dividends for {ticker}: {e}")
 
             events.sort(key=lambda x: x["date"])
 
@@ -652,6 +645,8 @@ def generate_price_table(
                     cursor.execute("SELECT MIN(Date) FROM portfolio")
                     start_date = pd.to_datetime(cursor.fetchone()[0]).date()
 
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_prices_ticker_date ON prices(Ticker, Date)")
+
             end_date = datetime.today().date()
 
             if start_date > end_date:
@@ -663,11 +658,9 @@ def generate_price_table(
             specified_prices = _get_specified_prices(csv_file)
             logger.debug(f"Found specified prices for: {list(specified_prices.keys())}")
 
-            portfolio_df = pd.read_sql_query("SELECT * FROM portfolio", conn)
-            portfolio_df["Date"] = pd.to_datetime(portfolio_df["Date"]).dt.date
-            portfolio_df = portfolio_df.sort_values("Date")
-
-            tickers = [col for col in portfolio_df.columns if col != "Date"]
+            cursor.execute("PRAGMA table_info(portfolio)")
+            columns = cursor.fetchall()
+            tickers = [col[1] for col in columns if col[1] != "Date"]
 
             ticker_currency_cache: Dict[str, str] = {}
 
@@ -718,20 +711,54 @@ def generate_price_table(
                         logger.error(f"  Error processing specified prices for {ticker}: {e}")
 
                 ownership_periods = []
+                quoted_ticker = _quote_identifier(ticker)
+                baseline_df = pd.read_sql_query(
+                    f"""
+                    SELECT Date, {quoted_ticker} AS Holdings
+                    FROM portfolio
+                    WHERE Date < ?
+                    ORDER BY Date DESC
+                    LIMIT 1
+                    """,
+                    conn,
+                    params=(str(start_date),),
+                )
+                ticker_history = pd.read_sql_query(
+                    f"""
+                    SELECT Date, {quoted_ticker} AS Holdings
+                    FROM portfolio
+                    WHERE Date >= ?
+                    ORDER BY Date
+                    """,
+                    conn,
+                    params=(str(start_date),),
+                )
+                if not baseline_df.empty:
+                    ticker_history = (
+                        pd.concat([baseline_df, ticker_history], ignore_index=True)
+                        .drop_duplicates(subset=["Date"], keep="last")
+                        .sort_values("Date")
+                    )
 
-                for i, row in portfolio_df.iterrows():
+                if ticker_history.empty:
+                    continue
+
+                ticker_history["Date"] = pd.to_datetime(ticker_history["Date"]).dt.date
+                ticker_history = ticker_history.reset_index(drop=True)
+
+                for i, row in ticker_history.iterrows():
                     date_val = row["Date"]
-                    holdings = row[ticker]
+                    holdings = row["Holdings"]
 
-                    if i < len(portfolio_df) - 1:
-                        period_end = portfolio_df.iloc[i + 1]["Date"] - timedelta(days=1)
+                    if i < len(ticker_history) - 1:
+                        period_end = ticker_history.iloc[i + 1]["Date"]
                     else:
                         period_end = end_date
 
                     # Fetch prices for both long (positive) and short (negative) positions
                     if holdings != 0:
                         period_start = max(date_val, start_date)
-                        period_end = min(period_end + timedelta(days=1), end_date)
+                        period_end = min(period_end, end_date)
 
                         if period_start <= period_end:
                             ownership_periods.append((period_start, period_end))
@@ -804,15 +831,10 @@ def generate_price_table(
                         for date_val, price in prices_sek.items():
                             if pd.notna(price):
                                 cursor.execute(
-                                    "SELECT Price_SEK FROM prices WHERE Ticker = ? AND Date = ?",
-                                    (ticker, str(date_val.date())),
+                                    "INSERT OR IGNORE INTO prices (Date, Ticker, Price_SEK) VALUES (?, ?, ?)",
+                                    (str(date_val.date()), ticker, float(price)),
                                 )
-
-                                if not cursor.fetchone():
-                                    cursor.execute(
-                                        "INSERT OR REPLACE INTO prices (Date, Ticker, Price_SEK) VALUES (?, ?, ?)",
-                                        (str(date_val.date()), ticker, float(price)),
-                                    )
+                                if cursor.rowcount > 0:
                                     inserted_count += 1
 
                         logger.debug(f"  Inserted {inserted_count} price records for {ticker}")
